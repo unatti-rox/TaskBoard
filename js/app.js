@@ -96,7 +96,13 @@
     "new-task": function (el) {
       V.openTaskForm(null, { projectId: el.dataset.project, brand: el.dataset.brand, assignee: el.dataset.assignee });
     },
-    "edit-task": function (el) { V.openTaskForm(el.dataset.id); },
+    "new-brief": function (el) {
+      V.openBriefForm(null, { projectId: el.dataset.project, brand: el.dataset.brand, assignee: el.dataset.assignee });
+    },
+    "edit-task": function (el) {
+      const t = S.task(el.dataset.id);
+      if (t && t.brief) V.openBriefForm(el.dataset.id); else V.openTaskForm(el.dataset.id);
+    },
     "delete-task": function (el) {
       const t = S.task(el.dataset.id);
       if (!t || !confirm("Delete “" + t.name + "” and its time logs?")) return;

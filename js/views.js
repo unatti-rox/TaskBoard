@@ -77,6 +77,7 @@
           '<div class="task-info">' +
             "<h4>" + title + "</h4>" +
             "<p>" + meta.join(" · ") + "</p>" +
+            briefSummary(t.brief) +
             tools +
           "</div>" +
         "</div>" +
@@ -85,6 +86,28 @@
           '<div class="hours' + (logged > t.estimate ? " over" : "") + '">' + U.formatHours(logged) + " / " + U.formatHours(t.estimate) + " logged" + logButton + "</div>" +
         "</div>" +
       "</div>"
+    );
+  }
+
+  function parseLines(text) {
+    return String(text || "").split("\n").map(function (l) { return l.trim(); }).filter(Boolean);
+  }
+
+  function briefSummary(b) {
+    if (!b || !b.deliverables || !b.deliverables.length) return "";
+    const copyBadge = b.copyStatus === "tbd"
+      ? '<span class="pill danger">Copy TBD</span>'
+      : '<span class="pill">Copy final</span>';
+    return (
+      '<details class="brief-box">' +
+        '<summary>Brief — ' + b.deliverables.length + " deliverable" + (b.deliverables.length === 1 ? "" : "s") + " · " + copyBadge + "</summary>" +
+        '<div class="brief-body">' +
+          '<ul class="brief-list">' + b.deliverables.map(function (d) { return "<li>" + esc(d) + "</li>"; }).join("") + "</ul>" +
+          (b.copyStatus === "final" && b.copy ? "<p><strong>Copy:</strong> " + esc(b.copy) + "</p>" : "") +
+          (b.references ? "<p><strong>References &amp; mandatories:</strong> " + esc(b.references) + "</p>" : "") +
+          (b.avoid ? "<p><strong>Avoid:</strong> " + esc(b.avoid) + "</p>" : "") +
+        "</div>" +
+      "</details>"
     );
   }
 
@@ -256,6 +279,61 @@
     });
   }
 
+  /*
+    A structured brief: it always lists deliverables (with sizes) and states whether copy is
+    final or still to come, so a designer never has to chase those two things separately.
+  */
+  function openBriefForm(taskId, defaults) {
+    const t = taskId ? S.task(taskId) : null;
+    const b = t ? t.brief : null;
+    const d = defaults || {};
+    if (!S.state.team.length) { UI.toast("Add a team member in Settings first"); return; }
+    if (!S.state.brands.length) { UI.toast("Add a brand first"); return; }
+
+    UI.form({
+      title: t ? "Edit Brief" : "New Brief",
+      submitLabel: t ? "Save Brief" : "Create Brief",
+      fields: [
+        { id: "name", label: "Deliverable / Task Name", value: t ? t.name : "", placeholder: "e.g. Diwali Campaign — Instagram Carousel" },
+        { id: "projectId", label: "Project", type: "select", value: t ? t.projectId || "" : d.projectId || "", options: projectOptions(t && t.projectId) },
+        { id: "brand", label: "Brand (ignored when a project is picked)", type: "select", value: t ? t.brand : d.brand || "", options: S.state.brands.map(function (br) { return { value: br, label: br }; }) },
+        { id: "assignee", label: "Assign To", type: "select", value: t ? t.assignee : d.assignee || "", options: memberOptions() },
+        [
+          { id: "estimate", label: "Estimated Hours", type: "number", min: 0.5, step: 0.5, value: t ? t.estimate : 4 },
+          { id: "due", label: "Deadline", type: "date", value: t ? t.due : U.isoDate() },
+          { id: "priority", label: "Priority", type: "select", value: t ? t.priority : "medium", options: [
+            { value: "high", label: "High" }, { value: "medium", label: "Medium" }, { value: "low", label: "Low" }
+          ] }
+        ],
+        { id: "deliverables", label: "Deliverables — one per line, with the exact size", type: "textarea",
+          value: b ? b.deliverables.join("\n") : "",
+          placeholder: "Instagram Post – 1080×1350\nInstagram Story – 1080×1920\nWeb Banner – 728×90" },
+        { id: "copyStatus", label: "Copy status", type: "select", value: b ? b.copyStatus : "tbd", options: [
+          { value: "final", label: "Final copy is ready — attached below" },
+          { value: "tbd", label: "Copy isn't ready yet" }
+        ] },
+        { id: "copy", label: "Final copy / key message", type: "textarea", value: b ? b.copy : "", placeholder: "Paste the approved copy here" },
+        { id: "references", label: "References & mandatory elements (optional)", type: "textarea", value: b ? b.references : "", placeholder: "Links to references, logo files, brand guideline notes" },
+        { id: "avoid", label: "What to avoid (optional)", type: "textarea", value: b ? b.avoid : "", placeholder: "e.g. Don't use the old logo, avoid red backgrounds" }
+      ],
+      onSubmit: function (v) {
+        if (!v.name) return "Enter a name for this deliverable.";
+        if (!(v.estimate > 0)) return "Enter estimated hours greater than 0.";
+        if (!v.due) return "Pick a deadline.";
+        const deliverables = parseLines(v.deliverables);
+        if (!deliverables.length) return "List at least one deliverable, with its size.";
+        if (v.copyStatus === "final" && !v.copy.trim()) return "Paste the final copy, or set Copy status to “Copy isn't ready yet”.";
+        const p = v.projectId ? S.project(v.projectId) : null;
+        if (p) v.brand = p.brand;
+        v.id = t ? t.id : null;
+        v.note = t ? t.note : "";
+        v.brief = { deliverables: deliverables, copyStatus: v.copyStatus, copy: v.copy.trim(), references: v.references.trim(), avoid: v.avoid.trim() };
+        const saved = S.saveTask(v);
+        UI.toast(t ? "Saved brief for " + saved.name : "Brief created for " + saved.name);
+      }
+    });
+  }
+
   function openLogForm(taskId) {
     const tasks = S.state.tasks.filter(function (t) { return S.canWorkOn(t) && (t.status !== "completed" || t.id === taskId); });
     if (!tasks.length) { UI.toast(S.isManager() ? "No open tasks to log time on" : "You have no open tasks to log time on"); return; }
@@ -417,7 +495,7 @@
           }
         ]) +
         '<div class="grid-2">' +
-          panel("Today's Tasks", taskList, { action: mgr('<button class="primary-button" data-action="new-task">+ Assign Task</button>') }) +
+          panel("Today's Tasks", taskList, { action: mgr('<div class="panel-buttons"><button class="secondary-button" data-action="new-task">+ Quick Task</button><button class="primary-button" data-action="new-brief">+ New Brief</button></div>') }) +
           panel("Team Bandwidth", S.state.team.map(bandwidthRow).join("") || empty("No team members yet."), {
             action: '<a class="panel-action" href="#/bandwidth">This week →</a>'
           }) +
@@ -470,7 +548,7 @@
 
       return filters + panel(list.length + " task" + (list.length === 1 ? "" : "s"), body, {
         note: U.formatHours(estimate) + " estimated in total",
-        action: mgr('<button class="primary-button" data-action="new-task">+ Assign Task</button>')
+        action: mgr('<div class="panel-buttons"><button class="secondary-button" data-action="new-task">+ Quick Task</button><button class="primary-button" data-action="new-brief">+ New Brief</button></div>')
       });
     }
   };
@@ -517,7 +595,7 @@
             "</dl>" +
             '<div class="card-actions">' +
               '<button class="secondary-button" data-action="project-tasks" data-id="' + p.id + '">View tasks</button>' +
-              mgr((p.archived ? "" : '<button class="secondary-button" data-action="new-task" data-project="' + p.id + '">+ Task</button>') +
+              mgr((p.archived ? "" : '<button class="secondary-button" data-action="new-brief" data-project="' + p.id + '">+ Brief</button>') +
                 '<button class="tool-button" data-action="edit-project" data-id="' + p.id + '">Edit</button>' +
                 '<button class="tool-button" data-action="archive-project" data-id="' + p.id + '">' + (p.archived ? "Restore" : "Archive") + "</button>") +
             "</div>" +
@@ -565,7 +643,7 @@
             '<div class="card-note">' + (projects.length ? "Projects: " + projects.map(function (p) { return esc(p.name); }).join(", ") : "No active projects") + "</div>" +
             '<div class="card-actions">' +
               '<button class="secondary-button" data-action="brand-tasks" data-brand="' + esc(b) + '">View tasks</button>' +
-              mgr('<button class="secondary-button" data-action="new-task" data-brand="' + esc(b) + '">+ Task</button>' +
+              mgr('<button class="secondary-button" data-action="new-brief" data-brand="' + esc(b) + '">+ Brief</button>' +
                 (inUse ? "" : '<button class="tool-button danger" data-action="remove-brand" data-brand="' + esc(b) + '">Remove</button>')) +
             "</div>" +
           "</article>"
@@ -954,6 +1032,7 @@
     views: views,
     ui: ui,
     openTaskForm: openTaskForm,
+    openBriefForm: openBriefForm,
     openLogForm: openLogForm,
     openBlockForm: openBlockForm,
     openProjectForm: openProjectForm,

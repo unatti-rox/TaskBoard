@@ -140,7 +140,8 @@
   function taskRow(t) {
     return {
       id: t.id, name: t.name, projectId: t.projectId, brand: t.brand, assignee: t.assignee, estimate: t.estimate,
-      due: t.due, priority: t.priority, status: t.status, completedOn: t.completedOn, note: t.note, createdOn: t.createdOn
+      due: t.due, priority: t.priority, status: t.status, completedOn: t.completedOn, note: t.note, createdOn: t.createdOn,
+      brief: t.brief || null
     };
   }
 
@@ -248,6 +249,12 @@
       }
     });
 
+    state.tasks.forEach(function (t) {
+      if (t.brief && t.brief.copyStatus === "tbd" && t.status !== "completed" && U.daysFromToday(t.due) <= 2) {
+        list.push({ level: "warning", taskId: t.id, text: t.name + " still needs final copy", meta: memberName(t.assignee) + " · " + U.dueLabel(t.due).text });
+      }
+    });
+
     state.team.forEach(function (m) {
       const a = allocation(m);
       if (a.free < 0) list.push({ level: "warning", memberId: m.id, text: m.name + " is over capacity by " + U.formatHours(-a.free), meta: "This week" });
@@ -279,6 +286,7 @@
         name: data.name, projectId: data.projectId || null, brand: data.brand, assignee: data.assignee,
         estimate: data.estimate, due: data.due, priority: data.priority, note: data.note || ""
       });
+      if (data.brief !== undefined) existing.brief = data.brief;
       commit(reassigned ? existing.name + " reassigned to " + memberName(data.assignee) : existing.name + " updated",
         [{ table: "tasks", action: "update", id: existing.id, row: taskRow(existing) }]);
       return existing;
@@ -296,6 +304,7 @@
       status: "todo",
       completedOn: null,
       note: data.note || "",
+      brief: data.brief || null,
       createdOn: U.isoDate()
     };
     state.tasks.push(t);

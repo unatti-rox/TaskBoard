@@ -10,6 +10,7 @@ Every view in the sidebar works. Each one has its own URL (`#/tasks`, `#/analyti
 
 - **Today**: summary cards, today's tasks, team bandwidth and the live daily report.
 - **Tasks**: every task, with filters for status, brand, person and project, plus sorting. You can edit, delete and log time on any task. Click a task name to edit it.
+- **Briefs**: "+ New Brief" opens a structured intake form instead of a bare task — deliverables with their exact sizes, whether final copy is attached or still to come, references and mandatory brand elements, and what to avoid. It won't save without at least one deliverable, and it won't accept "final copy" without the copy actually being pasted in. Anyone assigned the task sees the brief inline, and if copy is still marked "not ready" within 2 days of the deadline, it shows up in Notifications.
 - **Projects**: group tasks by campaign. Each project shows progress, hours logged against the estimate, and who's working on it. Projects can be archived.
 - **Brands**: open work, tasks finished this week and hours logged this week for each brand. You can add brands, and remove ones that aren't in use.
 - **Bandwidth**: each person's load this week: tasks, other work booked outside TaskBoard, and the gap between hours allocated and their capacity.

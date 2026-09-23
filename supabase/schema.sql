@@ -42,6 +42,7 @@ create table if not exists public.tasks (
   status        text not null default 'todo' check (status in ('todo', 'progress', 'completed', 'blocked')),
   completed_on  date,
   note          text not null default '',
+  brief         jsonb,                            -- structured brief: deliverables, copy status, references, what to avoid
   created_on    date not null default current_date
 );
 
@@ -66,6 +67,9 @@ create table if not exists public.workspace (
   team_name  text not null default 'Creative Operations'
 );
 insert into public.workspace (id) values (1) on conflict do nothing;
+
+-- Running this file again on a database created before "brief" existed: add the column.
+alter table public.tasks add column if not exists brief jsonb;
 
 create index if not exists tasks_assignee_idx on public.tasks (assignee);
 create index if not exists time_logs_date_idx on public.time_logs (date);

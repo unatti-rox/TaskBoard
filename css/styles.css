@@ -486,6 +486,51 @@ a.panel-action:hover {
   margin-left: -6px;
 }
 
+.brief-box {
+  margin-top: 6px;
+  font-size: 11px;
+}
+
+.brief-box summary {
+  cursor: pointer;
+  color: #555;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.brief-box summary .pill {
+  margin-left: 2px;
+}
+
+.brief-body {
+  margin-top: 8px;
+  padding: 10px 12px;
+  background: #f1f1ef;
+  border-radius: 6px;
+  max-width: 480px;
+}
+
+.brief-body p {
+  margin-top: 6px;
+  color: #444;
+  white-space: pre-wrap;
+}
+
+.brief-body p:first-child {
+  margin-top: 0;
+}
+
+.brief-list {
+  list-style: disc;
+  padding-left: 18px;
+  color: #444;
+}
+
+.brief-list li {
+  margin-bottom: 2px;
+}
+
 .task-info p {
   font-size: 11px;
   color: #888;
