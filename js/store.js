@@ -1,6 +1,7 @@
 /* State, persistence, derived numbers and every change to the data. */
 (function () {
   const U = window.COUtils;
+  const Cloud = window.COCloud;
   const STORAGE_KEY = "creative-ops:v1";
   const ACTIVITY_LIMIT = 100;
 
@@ -11,7 +12,33 @@
     blocked: "Blocked"
   };
 
-  let state = load();
+  /* "local": everything lives in this browser. "cloud": the team's data lives in Supabase. */
+  const mode = Cloud.enabled ? "cloud" : "local";
+  const LOCAL_ME = { memberId: null, access: "manager", email: null };
+
+  let state = mode === "local" ? load() : emptyState();
+  let resolveReady;
+  const ready = new Promise(function (resolve) { resolveReady = resolve; });
+
+  if (mode === "local") {
+    state.me = LOCAL_ME;
+    resolveReady();
+  } else {
+    Cloud.start({
+      onData: function (data) {
+        state = data;
+        resolveReady();
+        if (typeof S.onChange === "function") S.onChange();
+      }
+    });
+  }
+
+  function emptyState() {
+    return {
+      version: 2, settings: { userName: "", teamName: "Creative Operations" }, team: [], brands: [], projects: [],
+      tasks: [], logs: [], activity: [], notificationsReadAt: null, me: { memberId: null, access: "member", email: null }
+    };
+  }
 
   /* ---------------- PERSISTENCE ---------------- */
 
@@ -60,20 +87,68 @@
   }
 
   function save() {
+    if (mode !== "local") return;
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      const copy = Object.assign({}, state);
+      delete copy.me;
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(copy));
     } catch (e) {
       console.warn("Could not save data.", e);
     }
   }
 
-  function commit(activityText) {
+  /*
+    Every change updates the in-memory state first, so the screen responds instantly,
+    then commit() saves it: the whole state to localStorage, or just the listed database
+    writes (ops) to Supabase. If Supabase refuses, the error is shown and the data reloaded.
+  */
+  function commit(activityText, ops) {
+    const writes = (ops || []).slice();
     if (activityText) {
-      state.activity.unshift({ id: U.uid("a"), at: new Date().toISOString(), text: activityText });
+      const entry = { id: U.uid("a"), at: new Date().toISOString(), text: activityText };
+      state.activity.unshift(entry);
       state.activity.length = Math.min(state.activity.length, ACTIVITY_LIMIT);
+      writes.push({ table: "activity", action: "insert", row: Object.assign({ actorId: state.me.memberId }, entry) });
     }
-    save();
+
+    if (mode === "local") {
+      save();
+    } else if (writes.length) {
+      Cloud.apply(writes).catch(function (err) {
+        console.error(err);
+        if (typeof S.onError === "function") S.onError("Couldn't save: " + (err.message || "unknown error"));
+        Cloud.refresh();
+      });
+    }
     if (typeof S.onChange === "function") S.onChange();
+  }
+
+  /* ---------------- PERMISSIONS ---------------- */
+
+  function isManager() {
+    return state.me.access === "manager";
+  }
+
+  function canWorkOn(t) {
+    return isManager() || (t && t.assignee === state.me.memberId);
+  }
+
+  function canDeleteLog(l) {
+    return isManager() || l.memberId === state.me.memberId;
+  }
+
+  function taskRow(t) {
+    return {
+      id: t.id, name: t.name, projectId: t.projectId, brand: t.brand, assignee: t.assignee, estimate: t.estimate,
+      due: t.due, priority: t.priority, status: t.status, completedOn: t.completedOn, note: t.note, createdOn: t.createdOn
+    };
+  }
+
+  function memberRow(m) {
+    return {
+      id: m.id, name: m.name, role: m.role, shortRole: m.shortRole, capacity: m.capacity,
+      otherHours: m.otherHours || 0, email: m.email || null, access: m.access || "member"
+    };
   }
 
   /* ---------------- LOOKUPS ---------------- */
@@ -204,7 +279,8 @@
         name: data.name, projectId: data.projectId || null, brand: data.brand, assignee: data.assignee,
         estimate: data.estimate, due: data.due, priority: data.priority, note: data.note || ""
       });
-      commit(reassigned ? existing.name + " reassigned to " + memberName(data.assignee) : existing.name + " updated");
+      commit(reassigned ? existing.name + " reassigned to " + memberName(data.assignee) : existing.name + " updated",
+        [{ table: "tasks", action: "update", id: existing.id, row: taskRow(existing) }]);
       return existing;
     }
 
@@ -223,7 +299,8 @@
       createdOn: U.isoDate()
     };
     state.tasks.push(t);
-    commit(state.settings.userName + " assigned " + t.name + " to " + memberName(t.assignee));
+    commit(state.settings.userName + " assigned " + t.name + " to " + memberName(t.assignee),
+      [{ table: "tasks", action: "insert", row: taskRow(t) }]);
     return t;
   }
 
@@ -232,7 +309,7 @@
     if (!t) return;
     state.tasks = state.tasks.filter(function (x) { return x.id !== id; });
     state.logs = state.logs.filter(function (l) { return l.taskId !== id; });
-    commit(t.name + " deleted");
+    commit(t.name + " deleted", [{ table: "tasks", action: "delete", id: id }]);
   }
 
   function setStatus(id, status, note) {
@@ -242,7 +319,8 @@
     t.completedOn = status === "completed" ? U.isoDate() : null;
     if (status === "blocked" && note !== undefined) t.note = note;
     commit(memberName(t.assignee) + " — " + t.name + " marked " + STATUS_LABELS[status].toLowerCase() +
-      (status === "blocked" && t.note ? ": " + t.note : ""));
+      (status === "blocked" && t.note ? ": " + t.note : ""),
+      [{ table: "tasks", action: "update", id: t.id, row: { status: t.status, completedOn: t.completedOn, note: t.note } }]);
   }
 
   /* ---------------- TIME LOGS ---------------- */
@@ -250,9 +328,14 @@
   function logTime(taskId, hours, date, note) {
     const t = task(taskId);
     if (!t) return;
-    state.logs.push({ id: U.uid("l"), taskId: t.id, memberId: t.assignee, hours: hours, date: date || U.isoDate(), note: note || "" });
-    if (t.status === "todo") t.status = "progress";
-    commit(memberName(t.assignee) + " logged " + U.formatHours(hours) + " on " + t.name);
+    const log = { id: U.uid("l"), taskId: t.id, memberId: t.assignee, hours: hours, date: date || U.isoDate(), note: note || "" };
+    const ops = [{ table: "time_logs", action: "insert", row: log }];
+    state.logs.push(log);
+    if (t.status === "todo") {
+      t.status = "progress";
+      ops.push({ table: "tasks", action: "update", id: t.id, row: { status: t.status } });
+    }
+    commit(memberName(t.assignee) + " logged " + U.formatHours(hours) + " on " + t.name, ops);
   }
 
   function deleteLog(id) {
@@ -260,7 +343,8 @@
     if (!l) return;
     state.logs = state.logs.filter(function (x) { return x.id !== id; });
     const t = task(l.taskId);
-    commit("Removed " + U.formatHours(l.hours) + " logged on " + (t ? t.name : "a task"));
+    commit("Removed " + U.formatHours(l.hours) + " logged on " + (t ? t.name : "a task"),
+      [{ table: "time_logs", action: "delete", id: id }]);
   }
 
   /* ---------------- PROJECTS & BRANDS ---------------- */
@@ -270,13 +354,19 @@
     if (existing) {
       Object.assign(existing, { name: data.name, brand: data.brand, due: data.due });
       /* Keep tasks' brand in line with their project. */
-      state.tasks.forEach(function (t) { if (t.projectId === existing.id) t.brand = existing.brand; });
-      commit("Project " + existing.name + " updated");
+      const ops = [{ table: "projects", action: "update", id: existing.id, row: { name: existing.name, brand: existing.brand, due: existing.due } }];
+      state.tasks.forEach(function (t) {
+        if (t.projectId === existing.id && t.brand !== existing.brand) {
+          t.brand = existing.brand;
+          ops.push({ table: "tasks", action: "update", id: t.id, row: { brand: t.brand } });
+        }
+      });
+      commit("Project " + existing.name + " updated", ops);
       return existing;
     }
     const p = { id: U.uid("p"), name: data.name, brand: data.brand, due: data.due, archived: false };
     state.projects.push(p);
-    commit("Project " + p.name + " created for " + p.brand);
+    commit("Project " + p.name + " created for " + p.brand, [{ table: "projects", action: "insert", row: p }]);
     return p;
   }
 
@@ -284,7 +374,8 @@
     const p = project(id);
     if (!p) return;
     p.archived = archived;
-    commit("Project " + p.name + (archived ? " archived" : " restored"));
+    commit("Project " + p.name + (archived ? " archived" : " restored"),
+      [{ table: "projects", action: "update", id: p.id, row: { archived: archived } }]);
   }
 
   function addBrand(name) {
@@ -292,7 +383,7 @@
     if (!clean) return "Enter a brand name.";
     if (state.brands.some(function (b) { return b.toLowerCase() === clean.toLowerCase(); })) return clean + " already exists.";
     state.brands.push(clean);
-    commit("Brand " + clean + " added");
+    commit("Brand " + clean + " added", [{ table: "brands", action: "insert", row: { name: clean } }]);
     return null;
   }
 
@@ -301,7 +392,7 @@
       state.projects.some(function (p) { return p.brand === name; });
     if (inUse) return name + " still has tasks or projects.";
     state.brands = state.brands.filter(function (b) { return b !== name; });
-    commit("Brand " + name + " removed");
+    commit("Brand " + name + " removed", [{ table: "brands", action: "delete", key: "name", id: name }]);
     return null;
   }
 
@@ -313,15 +404,18 @@
       Object.assign(existing, {
         name: data.name, role: data.role, shortRole: data.shortRole, capacity: data.capacity, otherHours: data.otherHours
       });
-      commit(existing.name + "'s details updated");
+      if (data.email !== undefined) existing.email = data.email || null;
+      if (data.access !== undefined) existing.access = data.access;
+      if (existing.id === state.me.memberId) state.settings.userName = existing.name;
+      commit(existing.name + "'s details updated", [{ table: "members", action: "update", id: existing.id, row: memberRow(existing) }]);
       return existing;
     }
     const m = {
       id: U.uid("m"), name: data.name, role: data.role, shortRole: data.shortRole,
-      capacity: data.capacity, otherHours: data.otherHours
+      capacity: data.capacity, otherHours: data.otherHours, email: data.email || null, access: data.access || "member"
     };
     state.team.push(m);
-    commit(m.name + " joined the team");
+    commit(m.name + " joined the team", [{ table: "members", action: "insert", row: memberRow(m) }]);
     return m;
   }
 
@@ -330,41 +424,75 @@
     if (!m) return;
     const open = state.tasks.filter(function (t) { return t.assignee === id && t.status !== "completed"; });
     if (open.length) return m.name + " still has " + open.length + " open task" + (open.length > 1 ? "s" : "") + ". Reassign them first.";
+    if (id === state.me.memberId) return "You can't remove yourself.";
     state.team = state.team.filter(function (x) { return x.id !== id; });
-    commit(m.name + " removed from the team");
+    commit(m.name + " removed from the team", [{ table: "members", action: "delete", id: id }]);
     return null;
   }
 
   function saveSettings(data) {
     Object.assign(state.settings, data);
-    commit();
+    commit(null, [{ table: "workspace", action: "update", id: 1, row: { teamName: state.settings.teamName } }]);
   }
 
   function markNotificationsRead() {
     state.notificationsReadAt = new Date().toISOString();
+    if (mode === "cloud") Cloud.markRead(state.notificationsReadAt);
     commit();
   }
 
+  /*
+    Local: replace everything. Cloud: add or update every row from the backup (nothing is deleted),
+    which is how a demo or single-browser setup is moved into the shared database.
+  */
   function replaceAll(data) {
-    state = migrate(data);
-    commit("Data imported");
+    const incoming = migrate(data);
+    if (mode === "local") {
+      incoming.me = LOCAL_ME;
+      state = incoming;
+      commit("Data imported");
+      return;
+    }
+    const ops = [
+      { table: "brands", action: "upsert", key: "name", row: incoming.brands.map(function (b) { return { name: b }; }) },
+      { table: "members", action: "upsert", row: incoming.team.map(function (m) {
+        const current = member(m.id);
+        /* Keep sign-in email and access for people already in the database. */
+        return memberRow(current ? Object.assign({}, m, { email: current.email, access: current.access }) : m);
+      }) },
+      { table: "projects", action: "upsert", row: incoming.projects },
+      { table: "tasks", action: "upsert", row: incoming.tasks.map(taskRow) },
+      { table: "time_logs", action: "upsert", row: incoming.logs.map(function (l) {
+        return { id: l.id, taskId: l.taskId, memberId: l.memberId, hours: l.hours, date: l.date, note: l.note || "" };
+      }) }
+    ].filter(function (op) { return op.row.length; });
+    commit("Data imported from a backup", ops);
   }
 
   function reload() {
+    if (mode !== "local") return;
     state = load();
+    state.me = LOCAL_ME;
     if (typeof S.onChange === "function") S.onChange();
   }
 
   function reset() {
+    if (mode !== "local") return;
     state = window.createSeedData();
+    state.me = LOCAL_ME;
     commit();
   }
 
   const S = {
     STATUS_LABELS: STATUS_LABELS,
     STORAGE_KEY: STORAGE_KEY,
+    mode: mode,
+    ready: ready,
     get state() { return state; },
     onChange: null,
+    onError: null,
+    isManager, canWorkOn, canDeleteLog,
+    signOut: function () { if (mode === "cloud") Cloud.signOut(); },
     member, memberName, task, project,
     hoursLoggedOnTask, hoursLogged, logsWhere, weekTasks, allocation, isOverdue, reportFor, alerts, unreadActivityCount,
     saveTask, deleteTask, setStatus, logTime, deleteLog,

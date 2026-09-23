@@ -20,6 +20,11 @@
 
   /* ---------------- SHARED PIECES ---------------- */
 
+  /* Returns the html only when the signed-in person is a manager. */
+  function mgr(html) {
+    return S.isManager() ? html : "";
+  }
+
   function matchesSearch(t) {
     const q = ui.search.trim().toLowerCase();
     if (!q) return true;
@@ -31,7 +36,8 @@
     const options = Object.keys(S.STATUS_LABELS).map(function (key) {
       return '<option value="' + key + '"' + (key === t.status ? " selected" : "") + ">" + S.STATUS_LABELS[key] + "</option>";
     }).join("");
-    return '<select class="status-select ' + t.status + '" data-action="status" data-id="' + t.id + '" aria-label="Status for ' + esc(t.name) + '">' + options + "</select>";
+    const disabled = S.canWorkOn(t) ? "" : " disabled";
+    return '<select class="status-select ' + t.status + '" data-action="status" data-id="' + t.id + '" aria-label="Status for ' + esc(t.name) + '"' + disabled + ">" + options + "</select>";
   }
 
   function taskRow(t, opts) {
@@ -50,24 +56,26 @@
     meta.push(detail);
 
     const logged = S.hoursLoggedOnTask(t.id);
-    const logButton = t.status === "completed"
+    const canWork = S.canWorkOn(t);
+    const logButton = t.status === "completed" || !canWork
       ? ""
       : '<button class="link-button" data-action="quick-log" data-id="' + t.id + '" aria-label="Log 30 minutes on ' + esc(t.name) + '">+30m</button>';
 
-    const tools = o.tools
-      ? '<div class="row-tools">' +
-          '<button class="tool-button" data-action="log-form" data-id="' + t.id + '">Log time</button>' +
-          '<button class="tool-button" data-action="edit-task" data-id="' + t.id + '">Edit</button>' +
-          '<button class="tool-button danger" data-action="delete-task" data-id="' + t.id + '">Delete</button>' +
-        "</div>"
-      : "";
+    const toolButtons =
+      (canWork && t.status !== "completed" ? '<button class="tool-button" data-action="log-form" data-id="' + t.id + '">Log time</button>' : "") +
+      mgr('<button class="tool-button" data-action="edit-task" data-id="' + t.id + '">Edit</button>' +
+        '<button class="tool-button danger" data-action="delete-task" data-id="' + t.id + '">Delete</button>');
+    const tools = o.tools && toolButtons ? '<div class="row-tools">' + toolButtons + "</div>" : "";
+    const title = S.isManager()
+      ? '<button class="task-name" data-action="edit-task" data-id="' + t.id + '">' + esc(t.name) + "</button>"
+      : esc(t.name);
 
     return (
       '<div class="task">' +
         '<div class="task-left">' +
           '<div class="task-dot ' + t.priority + '" title="' + t.priority + ' priority"></div>' +
           '<div class="task-info">' +
-            '<h4><button class="task-name" data-action="edit-task" data-id="' + t.id + '">' + esc(t.name) + "</button></h4>" +
+            "<h4>" + title + "</h4>" +
             "<p>" + meta.join(" · ") + "</p>" +
             tools +
           "</div>" +
@@ -249,8 +257,8 @@
   }
 
   function openLogForm(taskId) {
-    const tasks = S.state.tasks.filter(function (t) { return t.status !== "completed" || t.id === taskId; });
-    if (!tasks.length) { UI.toast("No open tasks to log time on"); return; }
+    const tasks = S.state.tasks.filter(function (t) { return S.canWorkOn(t) && (t.status !== "completed" || t.id === taskId); });
+    if (!tasks.length) { UI.toast(S.isManager() ? "No open tasks to log time on" : "You have no open tasks to log time on"); return; }
 
     UI.form({
       title: "Log Time",
@@ -340,9 +348,23 @@
           { id: "capacity", label: "Weekly Capacity (h)", type: "number", min: 1, step: 1, value: m ? m.capacity : 40 },
           { id: "otherHours", label: "Other Work This Week (h)", type: "number", min: 0, step: 0.5, value: m ? m.otherHours : 0 }
         ]
-      ],
+      ].concat(S.mode === "cloud" ? [[
+        { id: "email", label: "Sign-in Email", type: "email", value: m ? m.email || "" : "", placeholder: "name@company.com" },
+        { id: "access", label: "Access", type: "select", value: m ? m.access || "member" : "member", options: [
+          { value: "member", label: "Team member" }, { value: "manager", label: "Manager" }
+        ] }
+      ]] : []),
       onSubmit: function (v) {
         if (!v.name) return "Enter a name.";
+        if (S.mode === "cloud") {
+          v.email = v.email.toLowerCase();
+          if (v.email && !/^\S+@\S+\.\S+$/.test(v.email)) return "Enter a valid email, or leave it empty.";
+          const taken = S.state.team.some(function (x) { return x.email && x.email.toLowerCase() === v.email && (!m || x.id !== m.id); });
+          if (v.email && taken) return "Someone on the team already uses that email.";
+          const otherManagers = S.state.team.filter(function (x) { return x.access === "manager" && (!m || x.id !== m.id); });
+          if (m && m.access === "manager" && v.access !== "manager" && !otherManagers.length) return "The team needs at least one manager.";
+          if (m && m.id === S.state.me.memberId && v.email !== (m.email || "").toLowerCase()) return "You can't change your own sign-in email. Ask another manager.";
+        }
         if (!v.role) return "Enter a role.";
         if (!(v.capacity > 0)) return "Capacity must be more than 0.";
         if (!(v.otherHours >= 0)) return "Other work can't be negative.";
@@ -395,7 +417,7 @@
           }
         ]) +
         '<div class="grid-2">' +
-          panel("Today's Tasks", taskList, { action: '<button class="primary-button" data-action="new-task">+ Assign Task</button>' }) +
+          panel("Today's Tasks", taskList, { action: mgr('<button class="primary-button" data-action="new-task">+ Assign Task</button>') }) +
           panel("Team Bandwidth", S.state.team.map(bandwidthRow).join("") || empty("No team members yet."), {
             action: '<a class="panel-action" href="#/bandwidth">This week →</a>'
           }) +
@@ -448,7 +470,7 @@
 
       return filters + panel(list.length + " task" + (list.length === 1 ? "" : "s"), body, {
         note: U.formatHours(estimate) + " estimated in total",
-        action: '<button class="primary-button" data-action="new-task">+ Assign Task</button>'
+        action: mgr('<button class="primary-button" data-action="new-task">+ Assign Task</button>')
       });
     }
   };
@@ -495,9 +517,9 @@
             "</dl>" +
             '<div class="card-actions">' +
               '<button class="secondary-button" data-action="project-tasks" data-id="' + p.id + '">View tasks</button>' +
-              (p.archived ? "" : '<button class="secondary-button" data-action="new-task" data-project="' + p.id + '">+ Task</button>') +
-              '<button class="tool-button" data-action="edit-project" data-id="' + p.id + '">Edit</button>' +
-              '<button class="tool-button" data-action="archive-project" data-id="' + p.id + '">' + (p.archived ? "Restore" : "Archive") + "</button>" +
+              mgr((p.archived ? "" : '<button class="secondary-button" data-action="new-task" data-project="' + p.id + '">+ Task</button>') +
+                '<button class="tool-button" data-action="edit-project" data-id="' + p.id + '">Edit</button>' +
+                '<button class="tool-button" data-action="archive-project" data-id="' + p.id + '">' + (p.archived ? "Restore" : "Archive") + "</button>") +
             "</div>" +
           "</article>"
         );
@@ -509,7 +531,7 @@
             '<button data-action="projects-archived" data-value="false" aria-pressed="' + !ui.projects.archived + '">Active</button>' +
             '<button data-action="projects-archived" data-value="true" aria-pressed="' + ui.projects.archived + '">Archived (' + archivedCount + ")</button>" +
           "</div>" +
-          '<button class="primary-button" data-action="new-project">+ New Project</button>' +
+          mgr('<button class="primary-button" data-action="new-project">+ New Project</button>') +
         "</div>" +
         (cards ? '<div class="card-grid">' + cards + "</div>" : panel("Projects", empty(ui.projects.archived ? "No archived projects." : "No active projects. Create one to group related tasks.")))
       );
@@ -543,8 +565,8 @@
             '<div class="card-note">' + (projects.length ? "Projects: " + projects.map(function (p) { return esc(p.name); }).join(", ") : "No active projects") + "</div>" +
             '<div class="card-actions">' +
               '<button class="secondary-button" data-action="brand-tasks" data-brand="' + esc(b) + '">View tasks</button>' +
-              '<button class="secondary-button" data-action="new-task" data-brand="' + esc(b) + '">+ Task</button>' +
-              (inUse ? "" : '<button class="tool-button danger" data-action="remove-brand" data-brand="' + esc(b) + '">Remove</button>') +
+              mgr('<button class="secondary-button" data-action="new-task" data-brand="' + esc(b) + '">+ Task</button>' +
+                (inUse ? "" : '<button class="tool-button danger" data-action="remove-brand" data-brand="' + esc(b) + '">Remove</button>')) +
             "</div>" +
           "</article>"
         );
@@ -552,7 +574,7 @@
 
       return (
         '<div class="toolbar"><span class="panel-note">Numbers for this week start Monday ' + U.formatDate(weekStart) + '</span>' +
-          '<button class="primary-button" data-action="new-brand">+ Add Brand</button></div>' +
+          mgr('<button class="primary-button" data-action="new-brand">+ Add Brand</button>') + "</div>" +
         (cards ? '<div class="card-grid">' + cards + "</div>" : panel("Brands", empty("No brands yet.")))
       );
     }
@@ -587,10 +609,10 @@
               (!rows && !m.otherHours ? '<li class="muted">Nothing booked this week</li>' : "") +
             "</ul>" +
             '<div class="card-note">' + U.formatHours(loggedWeek) + " logged since Monday</div>" +
-            '<div class="card-actions">' +
+            mgr('<div class="card-actions">' +
               '<button class="secondary-button" data-action="new-task" data-assignee="' + m.id + '">+ Assign</button>' +
               '<button class="tool-button" data-action="edit-member" data-id="' + m.id + '">Edit capacity</button>' +
-            "</div>" +
+            "</div>") +
           "</article>"
         );
       }).join("");
@@ -671,7 +693,7 @@
             "<td>" + (t ? esc(t.name) : '<span class="muted">Deleted task</span>') + (l.note ? '<div class="muted small">' + esc(l.note) + "</div>" : "") + "</td>" +
             "<td>" + (t ? esc(t.brand) : "—") + "</td>" +
             '<td class="num">' + U.formatHours(l.hours) + "</td>" +
-            '<td class="num"><button class="tool-button danger" data-action="delete-log" data-id="' + l.id + '" aria-label="Delete this entry">Delete</button></td>' +
+            '<td class="num">' + (S.canDeleteLog(l) ? '<button class="tool-button danger" data-action="delete-log" data-id="' + l.id + '" aria-label="Delete this entry">Delete</button>' : "") + "</td>" +
           "</tr>"
         );
       }).join("");
@@ -828,8 +850,9 @@
 
       const alertList = alerts.length
         ? '<ul class="feed">' + alerts.map(function (a) {
-            const action = a.taskId
+            const action = a.taskId && S.isManager()
               ? ' data-action="edit-task" data-id="' + a.taskId + '"'
+              : a.taskId ? ' data-action="go" data-value="tasks"'
               : a.memberId ? ' data-action="go" data-value="bandwidth"' : ' data-action="go" data-value="reports"';
             return (
               '<li class="feed-item">' +
@@ -864,40 +887,64 @@
     title: "Settings",
     render: function () {
       const s = S.state.settings;
+      const cloud = S.mode === "cloud";
+      const manager = S.isManager();
+
       const members = S.state.team.map(function (m) {
+        const you = m.id === S.state.me.memberId;
         return (
           "<tr>" +
-            "<td><strong>" + esc(m.name) + "</strong></td>" +
+            "<td><strong>" + esc(m.name) + "</strong>" + (you ? ' <span class="muted">(you)</span>' : "") + "</td>" +
             "<td>" + esc(m.role) + "</td>" +
+            (cloud ? "<td>" + (m.email ? esc(m.email) : '<span class="muted">No sign-in email</span>') + "</td>" +
+              "<td>" + (m.access === "manager" ? "Manager" : "Team member") + "</td>" : "") +
             '<td class="num">' + U.formatHours(m.capacity) + "</td>" +
             '<td class="num">' + U.formatHours(m.otherHours || 0) + "</td>" +
-            '<td class="num nowrap">' +
+            '<td class="num nowrap">' + mgr(
               '<button class="tool-button" data-action="edit-member" data-id="' + m.id + '">Edit</button>' +
-              '<button class="tool-button danger" data-action="remove-member" data-id="' + m.id + '">Remove</button>' +
+              (you ? "" : '<button class="tool-button danger" data-action="remove-member" data-id="' + m.id + '">Remove</button>')) +
             "</td>" +
           "</tr>"
         );
       }).join("");
 
-      return (
-        panel("Workspace",
-          '<form class="inline-form" data-form="settings">' +
-            '<div class="field"><label for="setUser">Your name</label><input id="setUser" name="userName" value="' + esc(s.userName) + '" /></div>' +
+      const account = cloud
+        ? panel("Your account",
+            '<p class="panel-text">Signed in as <strong>' + esc(S.state.me.email) + "</strong> · " +
+              (manager ? "Manager: you can assign work and change everything." : "Team member: you can update and log time on your own tasks.") + "</p>" +
+            '<button class="secondary-button" data-action="sign-out">Sign out</button>')
+        : "";
+
+      const workspace = manager
+        ? '<form class="inline-form" data-form="settings">' +
+            (cloud ? "" : '<div class="field"><label for="setUser">Your name</label><input id="setUser" name="userName" value="' + esc(s.userName) + '" /></div>') +
             '<div class="field"><label for="setTeam">Team name</label><input id="setTeam" name="teamName" value="' + esc(s.teamName) + '" /></div>' +
             '<button class="primary-button" type="submit">Save</button>' +
-          "</form>") +
+          "</form>"
+        : '<p class="panel-text">Team name: <strong>' + esc(s.teamName) + "</strong></p>";
+
+      const dataText = cloud
+        ? "The team's data is stored in Supabase and shared by everyone who signs in. " +
+          (manager ? "Importing a backup adds or updates its tasks, projects, brands, people and time logs. Nothing already here is deleted." : "Export a copy any time.")
+        : "Everything is stored in this browser only. Export a backup to move it to another computer, or to bring it into shared team mode later.";
+
+      return (
+        account +
+        panel("Workspace", workspace) +
         panel("Team members", members
-          ? '<div class="table-wrap"><table class="table"><thead><tr><th>Name</th><th>Role</th><th class="num">Weekly capacity</th><th class="num">Other work</th><th><span class="visually-hidden">Actions</span></th></tr></thead><tbody>' + members + "</tbody></table></div>"
+          ? '<div class="table-wrap"><table class="table"><thead><tr><th>Name</th><th>Role</th>' +
+              (cloud ? "<th>Sign-in email</th><th>Access</th>" : "") +
+              '<th class="num">Weekly capacity</th><th class="num">Other work</th><th><span class="visually-hidden">Actions</span></th></tr></thead><tbody>' + members + "</tbody></table></div>"
           : empty("No team members yet."), {
-          note: "Capacity drives the bandwidth numbers",
-          action: '<button class="primary-button" data-action="new-member">+ Add Member</button>'
+          note: cloud ? "People can sign in once their email is added here" : "Capacity drives the bandwidth numbers",
+          action: mgr('<button class="primary-button" data-action="new-member">+ Add Member</button>')
         }) +
         panel("Data",
-          '<p class="panel-text">Everything is stored in this browser only. Export a backup to move it to another computer or share it with a teammate.</p>' +
+          '<p class="panel-text">' + esc(dataText) + "</p>" +
           '<div class="panel-buttons left">' +
             '<button class="secondary-button" data-action="export-json">Export backup (JSON)</button>' +
-            '<label class="secondary-button file-button">Import backup<input type="file" accept="application/json,.json" data-action="import-json" /></label>' +
-            '<button class="secondary-button danger" data-action="reset">Reset demo data</button>' +
+            mgr('<label class="secondary-button file-button">Import backup<input type="file" accept="application/json,.json" data-action="import-json" /></label>') +
+            (cloud ? "" : '<button class="secondary-button danger" data-action="reset">Reset demo data</button>') +
           "</div>")
       );
     }

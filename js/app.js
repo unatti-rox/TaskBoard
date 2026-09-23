@@ -88,6 +88,7 @@
   }
 
   S.onChange = render;
+  S.onError = UI.toast;
 
   /* ---------------- ACTIONS ---------------- */
 
@@ -164,6 +165,7 @@
       U.downloadFile("taskboard-backup-" + U.isoDate() + ".json", JSON.stringify(S.state, null, 2), "application/json");
       UI.toast("Backup downloaded");
     },
+    "sign-out": function () { S.signOut(); },
     "reset": function () {
       if (!confirm("Reset all tasks and time logs to the demo data?")) return;
       S.reset();
@@ -208,7 +210,10 @@
       reader.onload = function () {
         try {
           const data = JSON.parse(reader.result);
-          if (!confirm("Replace all current data with this backup?")) return;
+          const question = S.mode === "cloud"
+            ? "Add this backup's tasks, projects, brands, people and time logs to the team's shared data?"
+            : "Replace all current data with this backup?";
+          if (!confirm(question)) return;
           S.replaceAll(data);
           UI.toast("Backup imported");
         } catch (err) {
@@ -224,10 +229,11 @@
     const form = e.target;
     if (form.dataset.form !== "settings") return;
     e.preventDefault();
-    const userName = form.elements.userName.value.trim();
     const teamName = form.elements.teamName.value.trim();
-    if (!userName || !teamName) { UI.toast("Name and team name can't be empty"); return; }
-    S.saveSettings({ userName: userName, teamName: teamName });
+    const changes = { teamName: teamName };
+    if (form.elements.userName) changes.userName = form.elements.userName.value.trim();
+    if (!teamName || changes.userName === "") { UI.toast("Name and team name can't be empty"); return; }
+    S.saveSettings(changes);
     UI.toast("Settings saved");
   });
 
@@ -265,7 +271,9 @@
   });
   document.getElementById("sidebarScrim").addEventListener("click", closeSidebar);
 
-  document.getElementById("resetData").addEventListener("click", clickActions.reset);
+  const resetLink = document.getElementById("resetData");
+  if (S.mode === "cloud") resetLink.hidden = true;
+  resetLink.addEventListener("click", clickActions.reset);
 
   document.addEventListener("keydown", function (e) {
     if (e.key === "Escape" && sidebar.classList.contains("open")) closeSidebar();
@@ -288,5 +296,6 @@
 
   /* ---------------- INIT ---------------- */
 
-  route();
+  /* In team mode the data arrives after sign-in; until then the sign-in screen covers the page. */
+  S.ready.then(route);
 })();
