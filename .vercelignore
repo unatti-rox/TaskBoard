@@ -1,0 +1,4 @@
+# Only the static site is deployed.
+supabase/
+.github/
+README.md
