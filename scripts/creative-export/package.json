@@ -1,0 +1,17 @@
+{
+  "name": "creative-export",
+  "version": "1.0.0",
+  "description": "Batch resizing/export pipeline for TaskBoard: exports one master creative into every required ad size.",
+  "private": true,
+  "type": "commonjs",
+  "main": "export-creative.js",
+  "bin": {
+    "creative-export": "./export-creative.js"
+  },
+  "scripts": {
+    "export": "node export-creative.js"
+  },
+  "dependencies": {
+    "sharp": "^0.33.5"
+  }
+}

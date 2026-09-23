@@ -1,0 +1,9 @@
+[
+  { "name": "FB-1080x1920-reel", "width": 1080, "height": 1920, "format": "jpg" },
+  { "name": "FB-1080x1920-story", "width": 1080, "height": 1920, "format": "jpg" },
+  { "name": "FB-1200x628", "width": 1200, "height": 628, "format": "jpg" },
+  { "name": "FB-1200x1200", "width": 1200, "height": 1200, "format": "jpg" },
+  { "name": "GD-960x1200", "width": 960, "height": 1200, "format": "jpg" },
+  { "name": "GD-1200x628", "width": 1200, "height": 628, "format": "jpg" },
+  { "name": "GD-1200x1200", "width": 1200, "height": 1200, "format": "jpg" }
+]
