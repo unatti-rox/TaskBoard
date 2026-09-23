@@ -1078,6 +1078,76 @@ button.feed-text:hover {
   outline-offset: 2px;
 }
 
+/* ---------------- CREATIVE EXPORT ---------------- */
+
+.creative-upload {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.creative-file-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+}
+
+.creative-thumb {
+  width: 48px;
+  height: 48px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid #e5e5e2;
+}
+
+.creative-controls {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  margin-top: 16px;
+  flex-wrap: wrap;
+}
+
+.creative-results {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 14px;
+}
+
+.creative-result {
+  border: 1px solid #e5e5e2;
+  border-radius: 10px;
+  padding: 10px;
+  text-align: center;
+}
+
+.creative-result img {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  border-radius: 6px;
+  margin-bottom: 8px;
+  background: #f5f5f2;
+}
+
+.creative-result-name {
+  font-size: 11px;
+  font-weight: 600;
+  word-break: break-word;
+}
+
+.creative-result-size {
+  font-size: 10px;
+  color: #888;
+  margin-bottom: 6px;
+}
+
+.empty.alert {
+  color: #9b3b3b;
+}
+
 /* ---------------- BUTTONS ---------------- */
 
 .primary-button {
