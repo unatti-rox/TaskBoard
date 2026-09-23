@@ -1,398 +1,292 @@
+/* App shell: routing, top bar, and wiring clicks to actions. */
 (function () {
   const U = window.COUtils;
-  const STORAGE_KEY = "creative-ops:v1";
+  const S = window.COStore;
+  const UI = window.COUI;
+  const V = window.COViews;
+  const views = V.views;
+  const ui = V.ui;
 
-  const STATUS_LABELS = {
-    todo: "To Do",
-    progress: "In Progress",
-    completed: "Completed",
-    blocked: "Blocked"
-  };
+  const DEFAULT_VIEW = "today";
+  let currentView = DEFAULT_VIEW;
 
-  let state = loadState();
-  let searchQuery = "";
+  const viewEl = document.getElementById("view");
+  const searchInput = document.getElementById("searchInput");
+  const searchToggle = document.getElementById("searchToggle");
+  const sidebar = document.getElementById("sidebar");
 
-  /* ---------------- STATE ---------------- */
+  /* ---------------- ROUTING ---------------- */
 
-  function loadState() {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) return JSON.parse(raw);
-    } catch (e) {
-      console.warn("Could not read saved data, using demo data.", e);
+  function viewFromHash() {
+    const name = location.hash.replace(/^#\/?/, "");
+    return views[name] ? name : DEFAULT_VIEW;
+  }
+
+  function go(name) {
+    if (location.hash !== "#/" + name) location.hash = "#/" + name;
+    else route();
+  }
+
+  function route() {
+    const next = viewFromHash();
+    const changed = next !== currentView;
+    currentView = next;
+    if (views[next].onEnter) views[next].onEnter();
+    document.querySelectorAll(".nav-item").forEach(function (item) {
+      const active = item.dataset.view === next;
+      item.classList.toggle("active", active);
+      if (active) item.setAttribute("aria-current", "page"); else item.removeAttribute("aria-current");
+    });
+    closeSidebar();
+    render();
+    if (changed) {
+      window.scrollTo(0, 0);
+      document.getElementById("pageTitle").focus({ preventScroll: true });
     }
-    return window.createSeedData();
-  }
-
-  function saveState() {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-    } catch (e) {
-      console.warn("Could not save data.", e);
-    }
-  }
-
-  function member(id) {
-    return state.team.find(function (m) { return m.id === id; });
-  }
-
-  function hoursLoggedOnTask(taskId) {
-    return state.logs
-      .filter(function (l) { return l.taskId === taskId; })
-      .reduce(function (sum, l) { return sum + l.hours; }, 0);
-  }
-
-  function hoursLoggedToday(memberId) {
-    const today = U.isoDate();
-    return state.logs
-      .filter(function (l) { return l.date === today && (!memberId || l.memberId === memberId); })
-      .reduce(function (sum, l) { return sum + l.hours; }, 0);
-  }
-
-  /* Today's view: everything still open, plus anything finished today. */
-  function todaysTasks() {
-    const today = U.isoDate();
-    const q = searchQuery.trim().toLowerCase();
-    const order = { blocked: 0, progress: 1, todo: 2, completed: 3 };
-
-    return state.tasks
-      .filter(function (t) { return t.status !== "completed" || t.completedOn === today; })
-      .filter(function (t) {
-        if (!q) return true;
-        const m = member(t.assignee);
-        return [t.name, t.brand, m ? m.name : ""].join(" ").toLowerCase().includes(q);
-      })
-      .sort(function (a, b) {
-        return order[a.status] - order[b.status] || a.due.localeCompare(b.due);
-      });
   }
 
   /* ---------------- RENDER ---------------- */
 
   function render() {
-    renderSummary();
-    renderTasks();
-    renderBandwidth();
-    renderReport();
-  }
+    const view = views[currentView];
+    const s = S.state.settings;
 
-  function renderSummary() {
-    const today = U.isoDate();
-    const open = state.tasks.filter(function (t) { return t.status !== "completed"; });
-    const openBrands = new Set(open.map(function (t) { return t.brand; }));
-    const completedToday = state.tasks.filter(function (t) { return t.completedOn === today; });
-    const inProgress = state.tasks.filter(function (t) { return t.status === "progress"; });
-    const peopleInProgress = new Set(inProgress.map(function (t) { return t.assignee; }));
-    const missing = state.team.filter(function (m) { return hoursLoggedToday(m.id) === 0; });
-    const blocked = open.filter(function (t) { return t.status === "blocked"; });
+    document.title = view.title + " · " + s.teamName;
+    document.getElementById("pageTitle").textContent = view.title;
+    document.getElementById("todayLabel").textContent =
+      new Date().toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric" }) + " · " + s.teamName;
 
-    const cards = [
-      { label: "Open Tasks", value: open.length, small: "Across " + openBrands.size + " brands" },
-      { label: "Completed Today", value: completedToday.length, small: blocked.length + " blocked" },
-      { label: "Team Hours", value: U.formatHours(hoursLoggedToday()), small: "Logged today" },
-      { label: "In Progress", value: inProgress.length, small: "Across " + peopleInProgress.size + " people" },
-      {
-        label: "Missing Updates",
-        value: missing.length,
-        small: missing.length ? missing.map(function (m) { return m.name; }).join(", ") : "Everyone updated",
-        alert: missing.length > 0
-      }
-    ];
+    const avatar = document.getElementById("avatar");
+    avatar.textContent = U.initials(s.userName);
+    avatar.title = "Signed in as " + s.userName;
 
-    document.getElementById("summary").innerHTML = cards.map(function (c) {
-      return (
-        '<div class="summary-card' + (c.alert ? " alert" : "") + '">' +
-          '<div class="summary-label">' + c.label + "</div>" +
-          '<div class="summary-number">' + c.value + "</div>" +
-          '<div class="summary-small">' + U.escapeHtml(c.small) + "</div>" +
-        "</div>"
-      );
-    }).join("");
-  }
+    searchToggle.hidden = !view.search;
+    if (!view.search) searchInput.hidden = true;
 
-  function renderTasks() {
-    const list = document.getElementById("taskList");
-    const tasks = todaysTasks();
+    const alerts = S.alerts().filter(function (a) { return a.level !== "info"; }).length;
+    const badge = document.getElementById("notifyBadge");
+    badge.textContent = alerts;
+    badge.hidden = !alerts;
+    document.getElementById("notifyButton").setAttribute("aria-label", "Notifications" + (alerts ? ", " + alerts + " need attention" : ""));
 
-    if (!tasks.length) {
-      list.innerHTML = '<div class="empty">' +
-        (searchQuery ? "No tasks match “" + U.escapeHtml(searchQuery) + "”." : "No tasks for today. Assign one to get started.") +
-        "</div>";
-      return;
+    /* Keep focus on a filter/select across re-renders when possible. */
+    const active = document.activeElement;
+    const focusKey = active && viewEl.contains(active) ? focusKeyFor(active) : null;
+    viewEl.innerHTML = views[currentView].render();
+    if (focusKey) {
+      const again = viewEl.querySelector(focusKey);
+      if (again) again.focus();
     }
-
-    list.innerHTML = tasks.map(function (t) {
-      const m = member(t.assignee);
-      const due = U.dueLabel(t.due);
-      const detail = t.status === "blocked" && t.note
-        ? U.escapeHtml(t.note)
-        : '<span class="' + (due.overdue && t.status !== "completed" ? "overdue" : "") + '">' + due.text + "</span>";
-
-      const options = Object.keys(STATUS_LABELS).map(function (key) {
-        return '<option value="' + key + '"' + (key === t.status ? " selected" : "") + ">" + STATUS_LABELS[key] + "</option>";
-      }).join("");
-
-      const logButton = t.status === "completed"
-        ? ""
-        : '<button class="link-button" data-action="log" data-id="' + t.id + '" aria-label="Log 30 minutes on ' + U.escapeHtml(t.name) + '">+30m</button>';
-
-      return (
-        '<div class="task">' +
-          '<div class="task-left">' +
-            '<div class="task-dot ' + t.priority + '" title="' + t.priority + ' priority"></div>' +
-            '<div class="task-info">' +
-              "<h4>" + U.escapeHtml(t.name) + "</h4>" +
-              "<p>" + U.escapeHtml(t.brand) + " · " + U.escapeHtml(m ? m.name : "Unassigned") + " · " + detail + "</p>" +
-            "</div>" +
-          "</div>" +
-          '<div class="task-right">' +
-            '<select class="status-select ' + t.status + '" data-action="status" data-id="' + t.id + '" aria-label="Status for ' + U.escapeHtml(t.name) + '">' +
-              options +
-            "</select>" +
-            '<div class="hours">' + U.formatHours(hoursLoggedOnTask(t.id)) + " / " + U.formatHours(t.estimate) + " logged" + logButton + "</div>" +
-          "</div>" +
-        "</div>"
-      );
-    }).join("");
   }
 
-  function renderBandwidth() {
-    document.getElementById("bandwidth").innerHTML = state.team.map(function (m) {
-      const pct = Math.round((m.allocated / m.capacity) * 100);
-      const left = m.capacity - m.allocated;
-      const leftText = left > 0 ? U.formatHours(left) + " left" : left === 0 ? "At capacity" : "Over by " + U.formatHours(-left);
-
-      return (
-        '<div class="person">' +
-          '<div class="person-top">' +
-            '<div><span class="person-name">' + U.escapeHtml(m.name) + '</span><span class="person-role">' + U.escapeHtml(m.shortRole) + "</span></div>" +
-            '<div class="percentage">' + pct + "%</div>" +
-          "</div>" +
-          '<div class="bar" role="progressbar" aria-valuenow="' + pct + '" aria-valuemin="0" aria-valuemax="100" aria-label="' + U.escapeHtml(m.name) + ' allocation">' +
-            '<div class="bar-fill' + (pct > 100 ? " over" : "") + '" style="width:' + Math.min(pct, 100) + '%"></div>' +
-          "</div>" +
-          '<div class="person-bottom">' +
-            "<span>" + U.formatHours(m.allocated) + " / " + U.formatHours(m.capacity) + " allocated</span>" +
-            "<span>" + leftText + "</span>" +
-          "</div>" +
-        "</div>"
-      );
-    }).join("");
+  function focusKeyFor(el) {
+    if (el.dataset.filter) return '[data-filter="' + el.dataset.filter + '"]';
+    if (el.dataset.action && el.dataset.id) return '[data-action="' + el.dataset.action + '"][data-id="' + el.dataset.id + '"]';
+    if (el.dataset.action && el.dataset.value) return '[data-action="' + el.dataset.action + '"][data-value="' + el.dataset.value + '"]';
+    if (el.dataset.action) return '[data-action="' + el.dataset.action + '"]';
+    return null;
   }
 
-  function reportRows() {
-    const today = U.isoDate();
-    return state.team.map(function (m) {
-      const mine = state.tasks.filter(function (t) { return t.assignee === m.id; });
-      const completed = mine.filter(function (t) { return t.completedOn === today; }).length;
-      const progress = mine.filter(function (t) { return t.status === "progress"; }).length;
-      const blocked = mine.filter(function (t) { return t.status === "blocked"; }).length;
-      const hours = hoursLoggedToday(m.id);
-      return { member: m, hours, completed, progress, blocked, updated: hours > 0 };
-    });
-  }
-
-  function renderReport() {
-    document.getElementById("report").innerHTML = reportRows().map(function (r) {
-      const parts = [];
-      if (r.completed) parts.push(r.completed + " completed");
-      if (r.progress) parts.push(r.progress + " in progress");
-      if (r.blocked) parts.push(r.blocked + " blocked");
-      const status = r.updated ? (parts.join(" · ") || "Time logged") : "⚠ No update received";
-
-      return (
-        '<div class="report-card">' +
-          '<div class="report-name">' + U.escapeHtml(r.member.name) + "</div>" +
-          '<div class="report-role">' + U.escapeHtml(r.member.role) + "</div>" +
-          '<div class="report-hours">' + (r.updated ? U.formatHours(r.hours) : "—") + "</div>" +
-          '<div class="report-status">' + status + "</div>" +
-        "</div>"
-      );
-    }).join("");
-  }
+  S.onChange = render;
 
   /* ---------------- ACTIONS ---------------- */
 
-  function setStatus(taskId, status) {
-    const task = state.tasks.find(function (t) { return t.id === taskId; });
-    if (!task) return;
-    task.status = status;
-    task.completedOn = status === "completed" ? U.isoDate() : null;
-    saveState();
-    render();
-    toast(task.name + " marked " + STATUS_LABELS[status].toLowerCase());
-  }
+  const clickActions = {
+    "new-task": function (el) {
+      V.openTaskForm(null, { projectId: el.dataset.project, brand: el.dataset.brand, assignee: el.dataset.assignee });
+    },
+    "edit-task": function (el) { V.openTaskForm(el.dataset.id); },
+    "delete-task": function (el) {
+      const t = S.task(el.dataset.id);
+      if (!t || !confirm("Delete “" + t.name + "” and its time logs?")) return;
+      S.deleteTask(t.id);
+      UI.toast("Deleted " + t.name);
+    },
+    "quick-log": function (el) {
+      S.logTime(el.dataset.id, 0.5);
+      UI.toast("Logged 30m on " + S.task(el.dataset.id).name);
+    },
+    "log-form": function (el) { V.openLogForm(el.dataset.id); },
+    "delete-log": function (el) {
+      if (!confirm("Delete this time entry?")) return;
+      S.deleteLog(el.dataset.id);
+      UI.toast("Time entry deleted");
+    },
+    "export-report": function (el) { V.exportReport(el.dataset.date); },
+    "export-logs": function () { views.logs.exportCsv(); },
 
-  function logTime(taskId, hours) {
-    const task = state.tasks.find(function (t) { return t.id === taskId; });
-    if (!task) return;
-    state.logs.push({ taskId: task.id, memberId: task.assignee, hours: hours, date: U.isoDate() });
-    if (task.status === "todo") task.status = "progress";
-    saveState();
-    render();
-    toast("Logged " + U.formatHours(hours) + " on " + task.name);
-  }
+    "new-project": function () { V.openProjectForm(); },
+    "edit-project": function (el) { V.openProjectForm(el.dataset.id); },
+    "archive-project": function (el) {
+      const p = S.project(el.dataset.id);
+      S.setProjectArchived(p.id, !p.archived);
+      UI.toast((p.archived ? "Archived " : "Restored ") + p.name);
+    },
+    "project-tasks": function (el) {
+      Object.assign(ui.tasks, { status: "all", brand: "", assignee: "", project: el.dataset.id });
+      go("tasks");
+    },
+    "projects-archived": function (el) {
+      ui.projects.archived = el.dataset.value === "true";
+      render();
+    },
 
-  function assignTask(data) {
-    const task = {
-      id: U.uid("t"),
-      name: data.name,
-      brand: data.brand,
-      assignee: data.assignee,
-      estimate: data.estimate,
-      due: data.due,
-      priority: data.priority,
-      status: "todo",
-      completedOn: null
-    };
-    state.tasks.push(task);
-    const m = member(data.assignee);
-    if (m) m.allocated += data.estimate;
-    saveState();
-    render();
-    toast("Assigned " + task.name + " to " + (m ? m.name : "team"));
-  }
+    "new-brand": function () { V.openBrandForm(); },
+    "remove-brand": function (el) {
+      const error = S.removeBrand(el.dataset.brand);
+      UI.toast(error || "Removed " + el.dataset.brand);
+    },
+    "brand-tasks": function (el) {
+      Object.assign(ui.tasks, { status: "open", brand: el.dataset.brand, assignee: "", project: "" });
+      go("tasks");
+    },
 
-  function exportCsv() {
-    const today = U.isoDate();
-    const quote = function (v) { return '"' + String(v).replace(/"/g, '""') + '"'; };
-    const lines = [["Date", "Name", "Role", "Hours logged", "Completed", "In progress", "Blocked", "Update received"].map(quote).join(",")];
+    "new-member": function () { V.openMemberForm(); },
+    "edit-member": function (el) { V.openMemberForm(el.dataset.id); },
+    "remove-member": function (el) {
+      const m = S.member(el.dataset.id);
+      if (!m || !confirm("Remove " + m.name + " from the team?")) return;
+      const error = S.removeMember(m.id);
+      UI.toast(error || "Removed " + m.name);
+    },
 
-    reportRows().forEach(function (r) {
-      lines.push([today, r.member.name, r.member.role, r.hours, r.completed, r.progress, r.blocked, r.updated ? "Yes" : "No"].map(quote).join(","));
-    });
+    "report-shift": function (el) {
+      const next = U.addDays(Number(el.dataset.value), ui.reportDate);
+      if (next > U.isoDate()) return;
+      ui.reportDate = next;
+      render();
+    },
+    "report-today": function () { ui.reportDate = U.isoDate(); render(); },
+    "analytics-days": function (el) { ui.analytics.days = Number(el.dataset.value); render(); },
+    "go": function (el) { go(el.dataset.value); },
 
-    const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "daily-report-" + today + ".csv";
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
-    toast("Report exported");
-  }
+    "export-json": function () {
+      U.downloadFile("taskboard-backup-" + U.isoDate() + ".json", JSON.stringify(S.state, null, 2), "application/json");
+      UI.toast("Backup downloaded");
+    },
+    "reset": function () {
+      if (!confirm("Reset all tasks and time logs to the demo data?")) return;
+      S.reset();
+      UI.toast("Demo data restored");
+    }
+  };
 
-  /* ---------------- MODAL ---------------- */
+  viewEl.addEventListener("click", function (e) {
+    const el = e.target.closest("[data-action]");
+    if (!el || el.tagName === "SELECT" || el.tagName === "INPUT") return;
+    const fn = clickActions[el.dataset.action];
+    if (fn) fn(el);
+  });
 
-  const modal = document.getElementById("taskModal");
-  const form = document.getElementById("taskForm");
-  const formError = document.getElementById("formError");
+  viewEl.addEventListener("change", function (e) {
+    const el = e.target;
 
-  function openModal() {
-    document.getElementById("taskBrand").innerHTML = state.brands.map(function (b) {
-      return "<option>" + U.escapeHtml(b) + "</option>";
-    }).join("");
+    if (el.dataset.filter) {
+      const parts = el.dataset.filter.split(".");
+      ui[parts[0]][parts[1]] = el.value;
+      render();
+      return;
+    }
 
-    document.getElementById("taskAssignee").innerHTML = state.team.map(function (m) {
-      const left = m.capacity - m.allocated;
-      return '<option value="' + m.id + '">' + U.escapeHtml(m.name) + " — " + U.escapeHtml(m.shortRole) +
-        " (" + (left > 0 ? U.formatHours(left) + " free" : "full") + ")</option>";
-    }).join("");
+    if (el.dataset.action === "status") {
+      if (el.value === "blocked") {
+        el.value = S.task(el.dataset.id).status;
+        V.openBlockForm(el.dataset.id);
+        return;
+      }
+      S.setStatus(el.dataset.id, el.value);
+      UI.toast(S.task(el.dataset.id).name + " marked " + S.STATUS_LABELS[el.value].toLowerCase());
+    }
 
-    form.reset();
-    document.getElementById("taskDeadline").value = U.isoDate();
-    formError.textContent = "";
-    modal.classList.add("open");
-    document.getElementById("taskName").focus();
-  }
+    if (el.dataset.action === "report-date" && el.value) {
+      ui.reportDate = el.value > U.isoDate() ? U.isoDate() : el.value;
+      render();
+    }
 
-  function closeModal() {
-    modal.classList.remove("open");
-    document.getElementById("openModal").focus();
-  }
+    if (el.dataset.action === "import-json" && el.files.length) {
+      const reader = new FileReader();
+      reader.onload = function () {
+        try {
+          const data = JSON.parse(reader.result);
+          if (!confirm("Replace all current data with this backup?")) return;
+          S.replaceAll(data);
+          UI.toast("Backup imported");
+        } catch (err) {
+          UI.toast("That file isn't a TaskBoard backup");
+        }
+      };
+      reader.readAsText(el.files[0]);
+      el.value = "";
+    }
+  });
 
-  form.addEventListener("submit", function (e) {
+  viewEl.addEventListener("submit", function (e) {
+    const form = e.target;
+    if (form.dataset.form !== "settings") return;
     e.preventDefault();
-    const name = document.getElementById("taskName").value.trim();
-    const estimate = parseFloat(document.getElementById("taskEstimate").value);
-    const due = document.getElementById("taskDeadline").value;
-
-    if (!name) { formError.textContent = "Enter a task name."; return; }
-    if (!(estimate > 0)) { formError.textContent = "Enter estimated hours greater than 0."; return; }
-    if (!due) { formError.textContent = "Pick a deadline."; return; }
-
-    assignTask({
-      name: name,
-      brand: document.getElementById("taskBrand").value,
-      assignee: document.getElementById("taskAssignee").value,
-      estimate: estimate,
-      due: due,
-      priority: document.getElementById("taskPriority").value
-    });
-    closeModal();
+    const userName = form.elements.userName.value.trim();
+    const teamName = form.elements.teamName.value.trim();
+    if (!userName || !teamName) { UI.toast("Name and team name can't be empty"); return; }
+    S.saveSettings({ userName: userName, teamName: teamName });
+    UI.toast("Settings saved");
   });
 
-  /* ---------------- TOAST ---------------- */
+  /* ---------------- TOP BAR & SIDEBAR ---------------- */
 
-  let toastTimer;
-  function toast(message) {
-    const el = document.getElementById("toast");
-    el.textContent = message;
-    el.classList.add("show");
-    clearTimeout(toastTimer);
-    toastTimer = setTimeout(function () { el.classList.remove("show"); }, 2400);
-  }
-
-  /* ---------------- EVENTS ---------------- */
-
-  document.getElementById("openModal").addEventListener("click", openModal);
-  document.getElementById("closeModal").addEventListener("click", closeModal);
-  modal.addEventListener("click", function (e) { if (e.target === modal) closeModal(); });
-  document.addEventListener("keydown", function (e) {
-    if (e.key === "Escape" && modal.classList.contains("open")) closeModal();
-  });
-
-  const taskList = document.getElementById("taskList");
-  taskList.addEventListener("change", function (e) {
-    if (e.target.dataset.action === "status") setStatus(e.target.dataset.id, e.target.value);
-  });
-  taskList.addEventListener("click", function (e) {
-    const btn = e.target.closest("[data-action='log']");
-    if (btn) logTime(btn.dataset.id, 0.5);
-  });
-
-  const searchInput = document.getElementById("searchInput");
-  document.getElementById("searchToggle").addEventListener("click", function () {
+  searchToggle.addEventListener("click", function () {
     searchInput.hidden = !searchInput.hidden;
     if (!searchInput.hidden) {
       searchInput.focus();
     } else {
       searchInput.value = "";
-      searchQuery = "";
-      renderTasks();
+      ui.search = "";
+      render();
     }
   });
   searchInput.addEventListener("input", function () {
-    searchQuery = searchInput.value;
-    renderTasks();
+    ui.search = searchInput.value;
+    render();
   });
 
-  document.getElementById("exportReport").addEventListener("click", exportCsv);
-
-  document.getElementById("notifyButton").addEventListener("click", function () {
-    toast("Notifications are on the roadmap");
-  });
+  document.getElementById("notifyButton").addEventListener("click", function () { go("notifications"); });
 
   document.getElementById("nav").addEventListener("click", function (e) {
     const item = e.target.closest(".nav-item");
-    if (item && item.dataset.view !== "Today") toast(item.dataset.view + " view is on the roadmap");
+    if (item) go(item.dataset.view);
   });
 
-  document.getElementById("resetData").addEventListener("click", function () {
-    if (!confirm("Reset all tasks and time logs to the demo data?")) return;
-    state = window.createSeedData();
-    saveState();
-    render();
-    toast("Demo data restored");
+  function closeSidebar() {
+    sidebar.classList.remove("open");
+    document.getElementById("menuToggle").setAttribute("aria-expanded", "false");
+  }
+  document.getElementById("menuToggle").addEventListener("click", function () {
+    const open = sidebar.classList.toggle("open");
+    this.setAttribute("aria-expanded", String(open));
   });
+  document.getElementById("sidebarScrim").addEventListener("click", closeSidebar);
+
+  document.getElementById("resetData").addEventListener("click", clickActions.reset);
+
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape" && sidebar.classList.contains("open")) closeSidebar();
+  });
+
+  /* Re-render when the day rolls over or another tab changes the data. */
+  let lastDay = U.isoDate();
+  setInterval(function () {
+    if (U.isoDate() !== lastDay) {
+      lastDay = U.isoDate();
+      render();
+    }
+  }, 60000);
+
+  window.addEventListener("storage", function (e) {
+    if (e.key === S.STORAGE_KEY) S.reload();
+  });
+
+  window.addEventListener("hashchange", route);
 
   /* ---------------- INIT ---------------- */
 
-  document.getElementById("todayLabel").textContent =
-    new Date().toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric" }) +
-    " · Creative Operations";
-
-  render();
+  route();
 })();

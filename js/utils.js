@@ -8,18 +8,34 @@
     return y + "-" + m + "-" + day;
   }
 
-  function addDays(n) {
-    const d = new Date();
+  function parseIso(iso) {
+    const parts = iso.split("-").map(Number);
+    return new Date(parts[0], parts[1] - 1, parts[2]);
+  }
+
+  function addDays(n, fromIso) {
+    const d = fromIso ? parseIso(fromIso) : new Date();
     d.setDate(d.getDate() + n);
     return isoDate(d);
   }
 
   function daysFromToday(iso) {
-    const parts = iso.split("-").map(Number);
-    const target = new Date(parts[0], parts[1] - 1, parts[2]);
+    const target = parseIso(iso);
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     return Math.round((target - today) / 86400000);
+  }
+
+  /* Monday of the week containing the given date (defaults to today). */
+  function startOfWeek(iso) {
+    const d = iso ? parseIso(iso) : new Date();
+    const offset = (d.getDay() + 6) % 7;
+    d.setDate(d.getDate() - offset);
+    return isoDate(d);
+  }
+
+  function formatDate(iso, opts) {
+    return parseIso(iso).toLocaleDateString("en-GB", opts || { day: "numeric", month: "short" });
   }
 
   function dueLabel(iso) {
@@ -27,9 +43,7 @@
     if (diff < 0) return { text: "Overdue by " + -diff + "d", overdue: true };
     if (diff === 0) return { text: "Due today" };
     if (diff === 1) return { text: "Due tomorrow" };
-    const [y, m, d] = iso.split("-").map(Number);
-    const date = new Date(y, m - 1, d);
-    return { text: "Due " + date.toLocaleDateString("en-GB", { day: "numeric", month: "short" }) };
+    return { text: "Due " + formatDate(iso) };
   }
 
   function escapeHtml(value) {
@@ -46,5 +60,33 @@
     return prefix + "_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
   }
 
-  window.COUtils = { isoDate, addDays, daysFromToday, dueLabel, escapeHtml, formatHours, uid };
+  function sum(list, fn) {
+    return list.reduce(function (total, item) { return total + fn(item); }, 0);
+  }
+
+  function initials(name) {
+    return String(name).trim().split(/\s+/).map(function (p) { return p[0]; }).join("").slice(0, 2).toUpperCase();
+  }
+
+  function downloadFile(filename, content, type) {
+    const blob = new Blob([content], { type: type });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  function csv(rows) {
+    const quote = function (v) { return '"' + String(v).replace(/"/g, '""') + '"'; };
+    return rows.map(function (r) { return r.map(quote).join(","); }).join("\n");
+  }
+
+  window.COUtils = {
+    isoDate, parseIso, addDays, daysFromToday, startOfWeek, formatDate, dueLabel,
+    escapeHtml, formatHours, uid, sum, initials, downloadFile, csv
+  };
 })();

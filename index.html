@@ -10,37 +10,41 @@
 <body>
 
   <!-- SIDEBAR -->
-  <aside class="sidebar">
+  <aside class="sidebar" id="sidebar">
     <div class="logo">CREATIVE <span>OPS</span></div>
 
-    <nav id="nav">
+    <nav id="nav" aria-label="Main">
       <div class="nav-title">Workspace</div>
-      <button class="nav-item active" data-view="Today">Today</button>
-      <button class="nav-item" data-view="Tasks">Tasks</button>
-      <button class="nav-item" data-view="Projects">Projects</button>
-      <button class="nav-item" data-view="Brands">Brands</button>
+      <button class="nav-item" data-view="today">Today</button>
+      <button class="nav-item" data-view="tasks">Tasks</button>
+      <button class="nav-item" data-view="projects">Projects</button>
+      <button class="nav-item" data-view="brands">Brands</button>
 
       <div class="nav-title">Team</div>
-      <button class="nav-item" data-view="Bandwidth">Bandwidth</button>
-      <button class="nav-item" data-view="Daily Reports">Daily Reports</button>
-      <button class="nav-item" data-view="Time Logs">Time Logs</button>
+      <button class="nav-item" data-view="bandwidth">Bandwidth</button>
+      <button class="nav-item" data-view="reports">Daily Reports</button>
+      <button class="nav-item" data-view="logs">Time Logs</button>
 
       <div class="nav-title">Management</div>
-      <button class="nav-item" data-view="Analytics">Analytics</button>
-      <button class="nav-item" data-view="Notifications">Notifications</button>
-      <button class="nav-item" data-view="Settings">Settings</button>
+      <button class="nav-item" data-view="analytics">Analytics</button>
+      <button class="nav-item" data-view="notifications">Notifications</button>
+      <button class="nav-item" data-view="settings">Settings</button>
     </nav>
 
     <button class="reset-link" id="resetData">Reset demo data</button>
   </aside>
+  <div class="sidebar-scrim" id="sidebarScrim"></div>
 
   <!-- MAIN -->
   <main class="main">
 
     <div class="topbar">
-      <div>
-        <h1 class="page-title">Today</h1>
-        <div class="page-subtitle" id="todayLabel"></div>
+      <div class="topbar-left">
+        <button class="icon-button menu-toggle" id="menuToggle" aria-label="Open menu" aria-controls="sidebar" aria-expanded="false">☰</button>
+        <div>
+          <h1 class="page-title" id="pageTitle" tabindex="-1">Today</h1>
+          <div class="page-subtitle" id="todayLabel"></div>
+        </div>
       </div>
 
       <div class="top-actions">
@@ -49,107 +53,33 @@
           class="search-input"
           type="search"
           placeholder="Search tasks, brands, people"
-          aria-label="Search tasks"
+          aria-label="Search"
           hidden
         />
-        <button class="icon-button" id="searchToggle" aria-label="Search tasks">⌕</button>
-        <button class="icon-button" id="notifyButton" aria-label="Notifications">♧</button>
-        <div class="avatar" title="Signed in as AK">AK</div>
+        <button class="icon-button" id="searchToggle" aria-label="Search">⌕</button>
+        <button class="icon-button notify-button" id="notifyButton" aria-label="Notifications">
+          ♧<span class="badge" id="notifyBadge" hidden></span>
+        </button>
+        <div class="avatar" id="avatar"></div>
       </div>
     </div>
 
-    <!-- SUMMARY -->
-    <section class="summary-grid" id="summary"></section>
-
-    <!-- TASKS + BANDWIDTH -->
-    <section class="grid-2">
-
-      <div class="panel">
-        <div class="panel-header">
-          <h2 class="panel-title">Today's Tasks</h2>
-          <button class="primary-button" id="openModal">+ Assign Task</button>
-        </div>
-        <div id="taskList"></div>
-      </div>
-
-      <div class="panel">
-        <div class="panel-header">
-          <h2 class="panel-title">Team Bandwidth</h2>
-          <span class="panel-action">This week</span>
-        </div>
-        <div id="bandwidth"></div>
-      </div>
-
-    </section>
-
-    <!-- DAILY REPORT -->
-    <section class="panel">
-      <div class="panel-header">
-        <div>
-          <h2 class="panel-title">Daily Team Report</h2>
-          <div class="panel-note">Today's work, collected from time logged on tasks</div>
-        </div>
-        <button class="secondary-button" id="exportReport">Export Report (CSV)</button>
-      </div>
-      <div class="report-grid" id="report"></div>
-    </section>
+    <div id="view"></div>
 
   </main>
 
-  <!-- ASSIGN TASK MODAL -->
-  <div class="modal-overlay" id="taskModal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
-    <form class="modal" id="taskForm" novalidate>
-      <h2 id="modalTitle">Assign New Task</h2>
-
-      <div class="field">
-        <label for="taskName">Task Name</label>
-        <input id="taskName" type="text" placeholder="e.g. Sensorium Reel 04" required />
-      </div>
-
-      <div class="field">
-        <label for="taskBrand">Brand</label>
-        <select id="taskBrand"></select>
-      </div>
-
-      <div class="field">
-        <label for="taskAssignee">Assign To</label>
-        <select id="taskAssignee"></select>
-      </div>
-
-      <div class="field-row">
-        <div class="field">
-          <label for="taskEstimate">Estimated Hours</label>
-          <input id="taskEstimate" type="number" min="0.5" step="0.5" value="4" />
-        </div>
-
-        <div class="field">
-          <label for="taskDeadline">Deadline</label>
-          <input id="taskDeadline" type="date" />
-        </div>
-
-        <div class="field">
-          <label for="taskPriority">Priority</label>
-          <select id="taskPriority">
-            <option value="high">High</option>
-            <option value="medium" selected>Medium</option>
-            <option value="low">Low</option>
-          </select>
-        </div>
-      </div>
-
-      <p class="form-error" id="formError" role="alert"></p>
-
-      <div class="modal-actions">
-        <button type="button" class="secondary-button" id="closeModal">Cancel</button>
-        <button type="submit" class="primary-button">Assign Task</button>
-      </div>
-    </form>
+  <!-- FORM MODAL (content is built by js/ui.js) -->
+  <div class="modal-overlay" id="formModal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <form class="modal" id="modalForm" novalidate></form>
   </div>
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
   <script src="js/utils.js"></script>
   <script src="js/data.js"></script>
+  <script src="js/store.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/views.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>
