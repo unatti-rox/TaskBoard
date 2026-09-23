@@ -43,8 +43,8 @@ The database enforces these rules itself (row level security in `supabase/schema
 2. Open **SQL Editor → New query**, paste the whole of `supabase/schema.sql` and click **Run**. It's safe to run again later.
 3. Add yourself as the first manager. The last lines of `schema.sql` show how: fill in your name and email, then run just that `insert`.
 4. Go to **Authentication → URL Configuration**:
-   - Set **Site URL** to `https://unatti-rox.github.io/TaskBoard/`.
-   - Add the same address, and `http://localhost:8000/` for local testing, under **Redirect URLs**.
+   - Set **Site URL** to your Vercel address, e.g. `https://taskboard-<something>.vercel.app/`.
+   - Add the same address, and `http://localhost:8000/` for local testing, under **Redirect URLs**. If you want sign-in to work on pull request previews too, also add `https://*-<your-vercel-team>.vercel.app/**`.
 5. Go to **Project Settings → API**. Copy the **Project URL** and the **anon public** key into `js/config.js`, then commit and push. The anon key is meant to be public, because the database's rules protect the data.
 6. Open the site and sign in with your email. You'll get a sign-in link.
 7. In **Settings → Team members**, give each person a sign-in email, and make any other managers. They can sign in as soon as their email is there.
@@ -63,11 +63,21 @@ python3 -m http.server 8000
 # then open http://localhost:8000
 ```
 
-## Deploy with GitHub Pages
+## Deploy with Vercel
 
-1. Push this repo to GitHub (see below).
-2. In the repo, go to **Settings → Pages** and set **Source** to **GitHub Actions**.
-3. Every push to `main` deploys automatically (live at https://unatti-rox.github.io/TaskBoard/) via `.github/workflows/deploy.yml`. The live URL appears in the **Actions** tab.
+The site is plain static files, so Vercel serves it as-is with no build step. `vercel.json` adds a few security headers.
+
+One-time setup:
+
+1. Sign in at [vercel.com](https://vercel.com) with GitHub.
+2. Click **Add New → Project**, pick **unatti-rox/TaskBoard** and click **Import**.
+3. Leave **Framework Preset** as **Other**, with no build command and the output directory left empty. Click **Deploy**.
+
+After that:
+
+- Every push to `main` goes live automatically.
+- Every pull request gets its own preview link.
+- The live address is shown on the project page, e.g. `https://taskboard-<something>.vercel.app`. You can add your own domain under **Settings → Domains**.
 
 ## Project structure
 
@@ -82,7 +92,7 @@ js/store.js             State, saving, migrations, permissions, derived numbers 
 js/ui.js                Toast and the reusable form modal
 js/views.js             One render function per view, plus the forms
 js/app.js               Routing, top bar and wiring clicks to actions
-.github/workflows/      GitHub Pages deployment
+vercel.json             Vercel hosting settings (security headers)
 supabase/schema.sql     Database tables, access rules and live updates for team mode
 ```
 
