@@ -1,0 +1,7 @@
+node_modules/
+exports/
+*.jpg
+*.jpeg
+*.png
+*.webp
+!README.md

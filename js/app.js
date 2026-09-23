@@ -165,6 +165,38 @@
       U.downloadFile("taskboard-backup-" + U.isoDate() + ".json", JSON.stringify(S.state, null, 2), "application/json");
       UI.toast("Backup downloaded");
     },
+    "creative-clear": function () {
+      const ce = ui.creativeExport;
+      if (ce.fileUrl) URL.revokeObjectURL(ce.fileUrl);
+      ce.results.forEach(function (r) { URL.revokeObjectURL(r.url); });
+      Object.assign(ce, { file: null, fileUrl: "", fileName: "", status: "idle", error: "", results: [] });
+      render();
+    },
+    "creative-run": function () {
+      const ce = ui.creativeExport;
+      if (!ce.file || ce.status === "processing") return;
+      ce.status = "processing";
+      ce.error = "";
+      render();
+      window.COCreativeExport.run(ce.file, { fit: ce.fit }).then(function (results) {
+        ce.results.forEach(function (r) { URL.revokeObjectURL(r.url); });
+        ce.results = results;
+        ce.status = "done";
+        render();
+      }).catch(function (err) {
+        ce.status = "error";
+        ce.error = err.message || "Export failed";
+        render();
+      });
+    },
+    "creative-download-zip": function () {
+      const ce = ui.creativeExport;
+      if (!ce.results.length) return;
+      const baseName = ce.fileName.replace(/\.[^.]+$/, "") || "creative";
+      window.COCreativeExport.buildZip(ce.results.map(function (r) { return { name: r.filename, blob: r.blob }; }))
+        .then(function (zipBlob) { window.COCreativeExport.downloadBlob(baseName + "-exports.zip", zipBlob); });
+    },
+
     "sign-out": function () { S.signOut(); },
     "reset": function () {
       if (!confirm("Reset all tasks and time logs to the demo data?")) return;
@@ -203,6 +235,22 @@
     if (el.dataset.action === "report-date" && el.value) {
       ui.reportDate = el.value > U.isoDate() ? U.isoDate() : el.value;
       render();
+    }
+
+    if (el.dataset.action === "creative-file" && el.files.length) {
+      const file = el.files[0];
+      if (!file.type.startsWith("image/")) { UI.toast("Choose an image file"); el.value = ""; return; }
+      const ce = ui.creativeExport;
+      if (ce.fileUrl) URL.revokeObjectURL(ce.fileUrl);
+      ce.results.forEach(function (r) { URL.revokeObjectURL(r.url); });
+      Object.assign(ce, { file: file, fileName: file.name, fileUrl: URL.createObjectURL(file), status: "idle", error: "", results: [] });
+      render();
+      return;
+    }
+
+    if (el.dataset.action === "creative-fit") {
+      ui.creativeExport.fit = el.value;
+      return;
     }
 
     if (el.dataset.action === "import-json" && el.files.length) {

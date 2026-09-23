@@ -15,7 +15,8 @@
     projects: { archived: false },
     reportDate: U.isoDate(),
     logs: { range: "week", member: "" },
-    analytics: { days: 7 }
+    analytics: { days: 7 },
+    creativeExport: { file: null, fileUrl: "", fileName: "", fit: "cover", status: "idle", error: "", results: [] }
   };
 
   /* ---------------- SHARED PIECES ---------------- */
@@ -946,6 +947,63 @@
             mgr('<label class="secondary-button file-button">Import backup<input type="file" accept="application/json,.json" data-action="import-json" /></label>') +
             (cloud ? "" : '<button class="secondary-button danger" data-action="reset">Reset demo data</button>') +
           "</div>")
+      );
+    }
+  };
+
+  views["creative-export"] = {
+    title: "Creative Export",
+    render: function () {
+      const ce = ui.creativeExport;
+      const sizeCount = window.COCreativeExport.SIZES.length;
+
+      const uploadBody =
+        '<div class="creative-upload">' +
+          '<label class="secondary-button file-button">Choose image<input type="file" accept="image/*" data-action="creative-file" /></label>' +
+          (ce.file
+            ? '<div class="creative-file-info">' +
+                '<img class="creative-thumb" src="' + ce.fileUrl + '" alt="" />' +
+                "<div><strong>" + esc(ce.fileName) + "</strong>" +
+                '<div><button class="link-button" type="button" data-action="creative-clear">Remove</button></div></div>' +
+              "</div>"
+            : "") +
+        "</div>" +
+        (ce.file
+          ? '<div class="creative-controls">' +
+              '<label class="filter"><span>Fit</span>' +
+                '<select data-action="creative-fit">' +
+                  '<option value="cover"' + (ce.fit === "cover" ? " selected" : "") + ">Crop to fill</option>" +
+                  '<option value="contain"' + (ce.fit === "contain" ? " selected" : "") + ">Fit whole image</option>" +
+                "</select>" +
+              "</label>" +
+              '<button class="primary-button" data-action="creative-run"' + (ce.status === "processing" ? " disabled" : "") + ">" +
+                (ce.status === "processing" ? "Exporting…" : "Export All Sizes") +
+              "</button>" +
+            "</div>"
+          : "");
+
+      const errorBlock = ce.error ? '<div class="empty alert">' + esc(ce.error) + "</div>" : "";
+
+      const resultsBlock = ce.results.length
+        ? panel("Exports (" + ce.results.length + ")",
+            '<div class="creative-results">' + ce.results.map(function (r) {
+              return (
+                '<div class="creative-result">' +
+                  '<img src="' + r.url + '" alt="" />' +
+                  '<div class="creative-result-name">' + esc(r.name) + "</div>" +
+                  '<div class="creative-result-size">' + r.width + "×" + r.height + "</div>" +
+                  '<a class="link-button" href="' + r.url + '" download="' + esc(r.filename) + '">Download</a>' +
+                "</div>"
+              );
+            }).join("") + "</div>",
+            { action: '<button class="secondary-button" data-action="creative-download-zip">Download All (.zip)</button>' })
+        : "";
+
+      return (
+        '<p class="panel-text">Upload one master creative and export it to every required ad size (' + sizeCount + ' sizes), named to match each platform automatically. Everything runs in your browser — nothing is uploaded anywhere.</p>' +
+        panel("Master creative", uploadBody) +
+        errorBlock +
+        resultsBlock
       );
     }
   };
